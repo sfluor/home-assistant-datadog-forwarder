@@ -47,7 +47,7 @@ _LOGGER = logging.getLogger(__name__)
 MetricId = namedtuple('MetricId', ["name", "tags"])
 Value = namedtuple('Value', ["id", "timestamp", "value"])
 
-def send_values(api: MetricsApi, values: List[Value], tags: List[str]) -> IntakePayloadAccepted:
+def send_values(api: MetricsApi, values: List[Value]) -> IntakePayloadAccepted:
 
     by_name: Dict[MetricId, List[MetricPoint]] = defaultdict(list)
 
@@ -94,18 +94,19 @@ def ts() -> int:
     return int(time.time())
 
 class ValueBuffer:
-    def __init__(self,  api: MetricsApi, flush_period_sec: int, tags: List[str]):
+    def __init__(self,  api: MetricsApi, flush_period_sec: int):
         self._b : List[Value] = []
         self._last_send: int = ts()
         self._flush_period_sec = flush_period_sec
         self._api = api
-        self._tags = tags
 
     def buffer_or_send(self, val: Value):
         self._b.append(val)
 
         if ts() - self._last_send > self._flush_period_sec:
-            send_values(self._api, self._b, self._tags)
+            res = send_values(self._api, self._b)
+            if res.errors:
+                _LOGGER.error("An error occurred sending %d points: %s", len(self._b), ",".join(res.errors))
             self._b = []
 
 
@@ -127,7 +128,7 @@ def setup(hass: HomeAssistant, config: ConfigType) -> bool:
     client = ApiClient(dd_conf)
     metrics_client = MetricsApi(client)
 
-    buffer = ValueBuffer(metrics_client, flush_period_sec, tags)
+    buffer = ValueBuffer(metrics_client, flush_period_sec)
 
     # Will listen on new events and potentially buffer metrics to be sent
     # to the Datadog API.
@@ -148,12 +149,12 @@ def setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
                 m_id = MetricId(attribute, tuple(event_tags))
                 buffer.buffer_or_send(Value(m_id, ts(), value))
-                _LOGGER.debug("Sent metric %s: %s (tags: %s)", attribute, value, tags)
+                _LOGGER.debug("Sent metric %s: %s (tags: %s)", attribute, value, event_tags)
 
         try:
             value = state_helper.state_as_number(state)
         except ValueError:
-            _LOGGER.error("Error sending %s: %s (tags: %s)", metric, state.state, tags)
+            _LOGGER.error("Error sending %s: %s (tags: %s)", metric, state.state, event_tags)
             return
 
         m_id = MetricId(metric, tuple(tags))
