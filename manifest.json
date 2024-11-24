@@ -2,6 +2,7 @@
   "domain": "datadog_forwarder",
   "name": "Datadog Forwarder",
   "iot_class": "cloud_push",
+  "documentation": "https://github.com/sfluor/home-assistant-datadog-forwarder",
   "loggers": ["datadog_forwarder"],
   "requirements": ["datadog-api-client==2.30.0"],
   "version": "0.1.0"

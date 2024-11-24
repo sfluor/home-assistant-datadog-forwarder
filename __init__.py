@@ -58,7 +58,7 @@ def send_values(api: MetricsApi, values: List[Value], tags: List[str]) -> Intake
 
     for id, points in by_name.items():
         points.sort(key=lambda p: p.timestamp)
-        serie = MetricSeries(metric=id.name, points=points, tags=id.tags)
+        serie = MetricSeries(metric=id.name, points=points, tags=[*id.tags])
         series.append(serie)
 
     body = MetricPayload(series)
@@ -146,7 +146,7 @@ def setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 attribute = f"{metric}.{key.replace(' ', '_')}"
                 value = int(value) if isinstance(value, bool) else value
 
-                m_id = MetricId(attribute, event_tags)
+                m_id = MetricId(attribute, tuple(event_tags))
                 buffer.buffer_or_send(Value(m_id, ts(), value))
                 _LOGGER.debug("Sent metric %s: %s (tags: %s)", attribute, value, tags)
 
@@ -156,7 +156,7 @@ def setup(hass: HomeAssistant, config: ConfigType) -> bool:
             _LOGGER.error("Error sending %s: %s (tags: %s)", metric, state.state, tags)
             return
 
-        m_id = MetricId(metric, tags)
+        m_id = MetricId(metric, tuple(tags))
         buffer.buffer_or_send(Value(m_id, ts(), value))
 
         _LOGGER.debug("Sent metric %s: %s (tags: %s)", metric, value, tags)
