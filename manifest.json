@@ -1,0 +1,8 @@
+{
+  "domain": "datadog_forwarder",
+  "name": "Datadog Forwarder",
+  "iot_class": "cloud_push",
+  "loggers": ["datadog_forwarder"],
+  "requirements": ["datadog-api-client==2.30.0"],
+  "version": "0.1.0"
+}
