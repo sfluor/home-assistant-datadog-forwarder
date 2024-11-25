@@ -19,6 +19,8 @@ from __future__ import annotations
 import time
 import logging
 
+from datadog_api_client.v2.model.metric_intake_type import MetricIntakeType
+
 import voluptuous as vol
 from typing import Dict, List
 from datadog_api_client import ApiClient, Configuration
@@ -49,26 +51,32 @@ MetricId = namedtuple("MetricId", ["name", "tags", "unit"])
 Value = namedtuple("Value", ["id", "timestamp", "value"])
 
 
-def send_values(api: MetricsApi, values: List[Value]) -> IntakePayloadAccepted:
+def send_values(dd_conf: Configuration, values: List[Value]) -> IntakePayloadAccepted:
+    with ApiClient(dd_conf) as client:
+        api = MetricsApi(client)
 
-    by_name: Dict[MetricId, List[MetricPoint]] = defaultdict(list)
+        by_name: Dict[MetricId, List[MetricPoint]] = defaultdict(list)
 
-    for value in values:
-        by_name[value.id].append(
-            MetricPoint(timestamp=value.timestamp, value=value.value)
-        )
+        for value in values:
+            by_name[value.id].append(
+                MetricPoint(timestamp=value.timestamp, value=value.value)
+            )
 
-    series: List[MetricSeries] = []
+        series: List[MetricSeries] = []
 
-    for id, points in by_name.items():
-        points.sort(key=lambda p: p.timestamp)
-        serie = MetricSeries(
-            metric=id.name, points=points, tags=[*id.tags], unit=id.unit
-        )
-        series.append(serie)
+        for id, points in by_name.items():
+            points.sort(key=lambda p: p.timestamp)
+            serie = MetricSeries(
+                metric=id.name,
+                points=points,
+                tags=[*id.tags],
+                unit=id.unit,
+                type=MetricIntakeType.GAUGE,
+            )
+            series.append(serie)
 
-    body = MetricPayload(series)
-    return api.submit_metrics(body=body)
+        body = MetricPayload(series)
+        return api.submit_metrics(body=body)
 
 
 # The domain of your component. Should be equal to the name of your component.
@@ -88,9 +96,7 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Required(CONF_API_KEY): cv.string,
                 vol.Required(CONF_APP_KEY): cv.string,
                 vol.Optional(CONF_FLUSH_PERIOD_SEC, default=60): int,
-                vol.Optional(
-                    CONF_PREFIX, default="home_assistant.datadog_forwarder"
-                ): cv.string,
+                vol.Optional(CONF_PREFIX, default="hass.datadog."): cv.string,
                 vol.Optional(CONF_TAGS, default=""): cv.string,
             }
         )
@@ -104,17 +110,17 @@ def ts() -> int:
 
 
 class ValueBuffer:
-    def __init__(self, api: MetricsApi, flush_period_sec: int):
+    def __init__(self, conf: Configuration, flush_period_sec: int):
         self._b: List[Value] = []
         self._last_send: int = ts()
         self._flush_period_sec = flush_period_sec
-        self._api = api
+        self._conf = conf
 
     def buffer_or_send(self, val: Value):
         self._b.append(val)
 
         if ts() - self._last_send > self._flush_period_sec:
-            res = send_values(self._api, self._b)
+            res = send_values(self._conf, self._b)
             if res.errors:
                 _LOGGER.error(
                     "An error occurred sending %d points: %s",
@@ -136,10 +142,7 @@ def setup(hass: HomeAssistant, config: ConfigType) -> bool:
     dd_conf.api_key["apiKeyAuth"] = conf["api_key"]
     dd_conf.api_key["appKeyAuth"] = conf["app_key"]
 
-    client = ApiClient(dd_conf)
-    metrics_client = MetricsApi(client)
-
-    buffer = ValueBuffer(metrics_client, flush_period_sec)
+    buffer = ValueBuffer(dd_conf, flush_period_sec)
 
     # Will listen on new events and potentially buffer metrics to be sent
     # to the Datadog API.
@@ -150,11 +153,12 @@ def setup(hass: HomeAssistant, config: ConfigType) -> bool:
             return
 
         attrs = dict(state.attributes)
-        metric = f"{prefix}.{state.entity_id}"
-        device_class = attrs.get("device_class", "unknown")
-        state_class = attrs.get("state_class", "unknown")
+        device_class = attrs.get("device_class", "unknown_device")
+        state_class = attrs.get("state_class", "unknown_state")
+        metric = f"{prefix}.{state.domain}.{device_class}.{state_class}"
         tags = [
             f"domain:{state.domain}",
+            f"entity_id:{state.entity_id}",
             f"device_class:{device_class}",
             f"state_class:{state_class}",
         ] + default_tags
@@ -165,6 +169,8 @@ def setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 attribute = f"{metric}.{key.replace(' ', '_')}"
                 value = int(value) if isinstance(value, bool) else value
 
+                # TODO: use real timestamp
+                # We don't set the unit here since we don't know what's the unit of this nested value.
                 m_id = MetricId(attribute, tuple(tags), "")
                 buffer.buffer_or_send(Value(m_id, ts(), value))
                 _LOGGER.debug("Sent metric %s: %s (tags: %s)", attribute, value, tags)
