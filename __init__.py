@@ -119,8 +119,10 @@ class ValueBuffer:
     def buffer_or_send(self, val: Value):
         self._b.append(val)
 
-        if ts() - self._last_send > self._flush_period_sec:
+        now = ts()
+        if now - self._last_send > self._flush_period_sec:
             res = send_values(self._conf, self._b)
+            self._last_send = now
             if res.errors:
                 _LOGGER.error(
                     "An error occurred sending %d points: %s",
@@ -164,15 +166,16 @@ def setup(hass: HomeAssistant, config: ConfigType) -> bool:
         ] + default_tags
         unit = attrs.get("unit_of_measurement", "")
 
+        ts = state.last_updated_timestamp
+
         for key, value in attrs.items():
             if isinstance(value, (float, int)):
                 attribute = f"{metric}.{key.replace(' ', '_')}"
                 value = int(value) if isinstance(value, bool) else value
 
-                # TODO: use real timestamp
                 # We don't set the unit here since we don't know what's the unit of this nested value.
                 m_id = MetricId(attribute, tuple(tags), "")
-                buffer.buffer_or_send(Value(m_id, ts(), value))
+                buffer.buffer_or_send(Value(m_id, ts, value))
                 _LOGGER.debug("Sent metric %s: %s (tags: %s)", attribute, value, tags)
 
         try:
@@ -182,7 +185,7 @@ def setup(hass: HomeAssistant, config: ConfigType) -> bool:
             return
 
         m_id = MetricId(metric, tuple(tags), unit)
-        buffer.buffer_or_send(Value(m_id, ts(), value))
+        buffer.buffer_or_send(Value(m_id, ts, value))
 
         _LOGGER.debug("Sent metric %s: %s (tags: %s)", metric, value, tags)
 
