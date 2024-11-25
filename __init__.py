@@ -96,7 +96,7 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Required(CONF_API_KEY): cv.string,
                 vol.Required(CONF_APP_KEY): cv.string,
                 vol.Optional(CONF_FLUSH_PERIOD_SEC, default=60): int,
-                vol.Optional(CONF_PREFIX, default="hass.datadog."): cv.string,
+                vol.Optional(CONF_PREFIX, default="hass.datadog"): cv.string,
                 vol.Optional(CONF_TAGS, default=""): cv.string,
             }
         )
